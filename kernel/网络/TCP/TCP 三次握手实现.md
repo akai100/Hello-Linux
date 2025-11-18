@@ -116,3 +116,27 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 ```
 
 ## tcp_v4_conn_request
+
+```C
+int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
+{
+    if (skb_rtable(skb)->rt_flags & (RTCF_BROADCAST | RTCF_MULTICAST))   // 收到 广播或者单播报文
+		goto drop;
+
+	return tcp_conn_request(&tcp_request_sock_ops, &tcp_request_sock_ipv4_ops, sk, skb);
+}
+
+```
+
+## tcp_conn_request
+
+```C
+int tcp_conn_request(struct request_sock_ops *rsk_ops,
+		             const struct tcp_request_sock_ops *af_ops,
+		             struct sock *sk, struct sk_buff *skb)
+{
+    ......
+    if ((syncookies == 2 || inet_csk_reqsk_queue_is_full(sk)) && !isn) {
+    }
+}
+```
