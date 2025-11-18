@@ -43,3 +43,76 @@ int tcp_connect(struct sock *sk)
     inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
 }
 ```
+
+# 2. 服务端收到 SYN 报文，进入
+## tcp_v4_rcv
+```C
+int tcp_v4_rcv(struct sk_buff *skb)
+{
+    ......
+    if (sk->sk_state == TCP_LISTEN) {
+        ret = tcp_v4_do_rcv(sk, skb);
+		goto put_and_return;
+    }
+}
+```
+
+## tcp_v4_do_rcv
+```C
+int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
+{
+    ......
+    if (sk->sk_state == TCP_LISTEN) {
+		struct sock *nsk = tcp_v4_cookie_check(sk, skb);
+
+		if (!nsk)
+			goto discard;
+		if (nsk != sk) {
+			if (tcp_child_process(sk, nsk, skb)) {
+				rsk = nsk;
+				goto reset;
+			}
+			return 0;
+		}
+    }
+
+}
+```
+## tcp_rcv_state_process
+
+```C
+int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
+{
+    switch (sk->sk_state) {
+    ......
+    case TCP_LISTEN:
+    if (th->ack)                                                   // LISTEN状态下收到ACK报文，返回1，发送 RST 报文重置对端连接
+			return 1;
+
+		if (th->rst) {                                             // 收到RST报文，直接丢弃
+			SKB_DR_SET(reason, TCP_RESET);
+			goto discard;
+		}
+		if (th->syn) {                                             // 收到 SYN 报文
+			if (th->fin) {
+				SKB_DR_SET(reason, TCP_FLAGS);
+				goto discard;
+			}
+			rcu_read_lock();
+			local_bh_disable();
+			acceptable = icsk->icsk_af_ops->conn_request(sk, skb) >= 0;
+			local_bh_enable();
+			rcu_read_unlock();
+
+			if (!acceptable)
+				return 1;
+			consume_skb(skb);
+			return 0;
+		}
+		SKB_DR_SET(reason, TCP_FLAGS);
+		goto discard;
+    ......
+}
+```
+
+## tcp_v4_conn_request
