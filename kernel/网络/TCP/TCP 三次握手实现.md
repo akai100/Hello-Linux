@@ -136,7 +136,34 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 		             struct sock *sk, struct sk_buff *skb)
 {
     ......
+    syncookies = READ_ONCE(net->ipv4.sysctl_tcp_syncookies);
+    // 1. (强制启用SYN Cookie机制 或者 半连接/全连接队列已满)
     if ((syncookies == 2 || inet_csk_reqsk_queue_is_full(sk)) && !isn) {
+        want_cookie = tcp_syn_flood_action(sk, rsk_ops->slab_name);
+		if (!want_cookie)
+			goto drop;
+    }
+    // 2. 当前的半连接队列长度超过允许的最大半连接（SYN_RECV 状态）队列长度
+    if (sk_acceptq_is_full(sk)) {
+        NET_INC_STATS(sock_net(sk), LINUX_MIB_LISTENOVERFLOWS);
+        goto drop;
+    }
+    // 3. fen
+    req = inet_reqsk_alloc(rsk_ops, sk, !want_cookie);
+    ......
+    tcp_openreq_init(req, &tmp_opt, skb, sk);
+    // 4.
+    if (fastopen_sk) {
+        af_ops->send_synack(fastopen_sk, dst, &fl, req, &foc, TCP_SYNACK_FASTOPEN, skb);
+        if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {
+            reqsk_fastopen_remove(fastopen_sk, req, false);
+            ......
+            goto drop_and_free;
+        }
+    } else {
+        af_ops->send_synack(sk, dst, &fl, req, &foc, !want_cookie ? TCP_SYNACK_NORMAL : TCP_SYNACK_COOKIE, skb);
     }
 }
 ```
+
+## tcp_openreq_init
