@@ -155,15 +155,162 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
     // 4.
     if (fastopen_sk) {
         af_ops->send_synack(fastopen_sk, dst, &fl, req, &foc, TCP_SYNACK_FASTOPEN, skb);
-        if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {
+        if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {      // 将 完整的半连接插入到 SYN Queue（半连接队列）
             reqsk_fastopen_remove(fastopen_sk, req, false);
             ......
             goto drop_and_free;
         }
     } else {
+        if (!want_cookie) {       //  不需要开启 Cookie 验证
+            req->timeout = tcp_timeout_init((struct sock *)req));
+            inet_csk_reqsk_queue_hash_add(sk, req, req->timeout);
+        }
         af_ops->send_synack(sk, dst, &fl, req, &foc, !want_cookie ? TCP_SYNACK_NORMAL : TCP_SYNACK_COOKIE, skb);
+        if (want_cookie) {
+            reqsk_free(req);
+            return 0;
+        }
     }
 }
 ```
 
+
+TCP Cookie 解决问题：
+
+1. SYN 洪水攻击风险：服务器收到客户端 SYN 后，会创建半连接（存入 SYN Queue）并回复 SYN + ACK，若客户端不回复 ACK ，半连接会占用资源直到超时，导致服务器拒绝服务；
+
+2. 短连接资源浪费：大量 HTTP 短连接的场景，服务器维护完整连接转；
+
 ## tcp_openreq_init
+
+# 3. 客户端收到服务器发送的 SYN + ACK 报文
+
+客户端对应sock连接状态为```SYN_SENT```态。
+
+
+## 3.1 tcp_v4_rcv
+
+```C
+int tcp_v4_rcv(struct sk_buff *skb)
+{
+}
+```
+
+## 3.2 tcp_v4_do_rcv
+
+```C
+int tcp_v4_do_rcv()
+{
+    ......
+    if (sk->sk_state == TCP_ESTABLISHED) {
+        ......
+        return 0;
+    }
+    ......
+    if (sk_state == TCP_LISTEN) {
+        ......
+    } else
+       sock_rps_save_rxhash(sk, skb);
+    if (tcp_rcv_state_process(sk, skb) {
+        rsk = sk;
+        goto reet'
+    }
+    return 0;
+    ......
+}
+```
+
+## 3.3 rcp_rcv_state_prpcess
+
+```C
+int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
+{
+    ......
+    swicth (sk=>sk_state) {
+    case TCP_CLOSE:
+        ......
+    case TCP_LISTEN:
+        ......
+    case TCP_SYN_SENT:
+        tp->rx_opt.saw_tstamp = 0;
+        tcp_mstamp_refresh(tp);
+        queued = tcp_rcv_synsent_state_process(sk, skb, th);
+        if (queued >= 0)
+           return queued;
+        tcp_urg(sk, skb, th);
+        __kfree_skb(skb);
+        tcp_data_snd_check(sk);
+        return 0;
+    }
+}
+```
+
+## 3.4 tcp_rcv_synsent_state_process
+
+```C
+static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb, const struct tcphdr *th)
+{
+     ......
+     tcp_parse_options(sock_net(sk), skb, &tp->rx_opt, 0, &foc);
+     if (th->ack) {
+        // 序列号检查
+        if (!after(TCP_SKB_CB(skb)->ack_seq, tp->snd_una) ||
+            after(TCP_SKB_CB(skb)->ack_seq, tp->snd_nxt)) {
+            if (icsk->icsk_retransmits == 0) {
+				inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, TCP_TIMEOUT_MIN, TCP_RTO_MAX);
+                goto reset_and_undo;
+            }
+        }
+        //
+        if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
+		    !between(tp->rx_opt.rcv_tsecr, tp->retrans_stamp,
+			     tcp_time_stamp_ts(tp))) {
+			NET_INC_STATS(sock_net(sk),
+					LINUX_MIB_PAWSACTIVEREJECTED);
+			goto reset_and_undo;
+		}
+
+        if (th->rst) {
+			tcp_reset(sk, skb);
+consume:
+			__kfree_skb(skb);
+		}
+
+		if (!th->syn) {
+			SKB_DR_SET(reason, TCP_FLAGS);
+			goto discard_and_undo;
+		}
+        tcp_ecn_rcv_synack(tp, th);
+
+		tcp_init_wl(tp, TCP_SKB_CB(skb)->seq);
+		tcp_try_undo_spurious_syn(sk);
+		tcp_ack(sk, skb, FLAG_SLOWPATH);
+
+        .....
+		tcp_finish_connect(sk, skb);
+		.....
+		tcp_send_ack(sk);
+		return -1;
+    }
+
+	if (th->rst) {
+		SKB_DR_SET(reason, TCP_RESET);
+		goto discard_and_undo;
+	}
+    // PAWS 校验
+	if (tp->rx_opt.ts_recent_stamp && tp->rx_opt.saw_tstamp &&
+	    tcp_paws_reject(&tp->rx_opt, 0)) {
+		SKB_DR_SET(reason, TCP_RFC7323_PAWS);
+		goto discard_and_undo;
+	}
+    // TCP_SENT状态下收到SYN 报文（不带ACK）
+    if (th->syn) {
+        tcp_set_state(sk, TCP_SYN_RECV);
+		......
+		tcp_send_synack(sk);
+	}
+
+}
+```
+
+
