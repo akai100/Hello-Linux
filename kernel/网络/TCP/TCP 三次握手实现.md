@@ -313,4 +313,20 @@ consume:
 }
 ```
 
+1. SYN SENT 状态下收到 RST 报文，清除sock中存储的选项，并丢弃报文
+
+2. PAWS 校验
+
+3. 客户端 在 SYN_SENT 状态下收到 AYN 报文，会进入 SYN_RECV 状态，这个对应两个两个连接同时发起场景；
+
+## 3.5 tcp_finish_connect
+
+```C
+void tcp_finish_connect(struct sock* sk, struct sk_buff* skb)
+{
+	tcp_ao_finish_connect(sk, skb);
+	tcp_set_state(sk, TCP_ESTABLISHED);
+	icsk->icsk_ack.lrcvtime = tcp_jiffies32;
+}
+```
 
