@@ -325,8 +325,70 @@ consume:
 void tcp_finish_connect(struct sock* sk, struct sk_buff* skb)
 {
 	tcp_ao_finish_connect(sk, skb);
-	tcp_set_state(sk, TCP_ESTABLISHED);
+	tcp_set_state(sk, TCP_ESTABLISHED);                                      // 设置 TCP 状态为 ESTABLISHED
 	icsk->icsk_ack.lrcvtime = tcp_jiffies32;
+
+    ......
+    if (sock_flag(sk, SOCK_KEEPOPEN))
+		inet_csk_reset_keepalive_alive_timer(sk, keepalive_time_when(tp));
+	.....
 }
 ```
+
+# 4. 服务器在半连接状态下收到 AYN + ACK报文
+
+## 4.1 tcp_v4_rcv
+
+```C
+int tcp_v4_rcv(struct sk_buff *skb)
+{
+	......
+    if (sk->sk_state == TCP_NEW_SYN_RECV) {
+		struct request_sock *req = inet_reqsk(sk);
+		sk = req->rsk_listener;
+		......
+		if (!tcp_filter(sk, skb)) {
+			tcp_v4_fill_cb(skb, iph, th);
+			nsk = tcp_check_req(sk, skb, req, false, &req_stolen);
+		} else {
+		}
+		if (!nsk) {
+			......
+		}
+		if (nsk == sk) {
+			reqsk_put(req);
+			tcp_v4_restore_cb(skb);
+		} else if (tcp_child_process(sk, nsk, skb)) {
+			tcp_v4_send_reset(nsk, skbb)
+		}
+	}
+}
+```
+
+## 4.2 tcp_check_req
+
+```C
+struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
+			               struct request_sock *req,
+			               bool fastopen, bool *req_stolen)
+{
+	......
+	if (TCP_SKB_CB(skb)->seq == tcp_rsk(req)->rcv_isn &&
+	    flg == TCP_FLAG_SYN &&
+		!paws_reject) {
+		......
+	}
+	//
+	if ((flg & TCP_FLAG_ACK) && !fastopen &&
+	    (TCP_SKB_CB(skb)->ack_seq !=
+	     tcp_rsk(req)->snt_isn + 1))
+		return sk;
+	.....
+	child = inet_csk(sk)->icsk_af_ops->syn_recv_sock(sk, skb, req, NULL,
+							 req, &own_req);
+	if (!child)
+		goto listen_overflow;
+}
+```
+
 
