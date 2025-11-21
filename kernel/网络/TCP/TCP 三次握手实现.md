@@ -1,6 +1,6 @@
 # 1. 客户端调用```connect```接口，发送 SYN 报文，进入 SYN_SENT 状态：
 
-## tcp_v4_connect
+## 1.1 tcp_v4_connect
 ```c
 int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
@@ -23,7 +23,7 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 }
 ```
 
-## tcp_connect
+## 1.2 tcp_connect
 
 ```C
 int tcp_connect(struct sock *sk)
@@ -45,7 +45,7 @@ int tcp_connect(struct sock *sk)
 ```
 
 # 2. 服务端收到 SYN 报文，进入
-## tcp_v4_rcv
+## 2.1 tcp_v4_rcv
 ```C
 int tcp_v4_rcv(struct sk_buff *skb)
 {
@@ -57,13 +57,13 @@ int tcp_v4_rcv(struct sk_buff *skb)
 }
 ```
 
-## tcp_v4_do_rcv
+## 2.2 tcp_v4_do_rcv
 ```C
 int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 {
     ......
     if (sk->sk_state == TCP_LISTEN) {
-		struct sock *nsk = tcp_v4_cookie_check(sk, skb);
+		struct sock *nsk = tcp_v4_cookie_check(sk, skb);    // 从cookie 重建 sock
 
 		if (!nsk)
 			goto discard;
@@ -78,7 +78,7 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 
 }
 ```
-## tcp_rcv_state_process
+## 2.3 tcp_rcv_state_process
 
 ```C
 int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
@@ -114,8 +114,11 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
     ......
 }
 ```
+1. listen 状态下，收到 ACK 报文，发送 RST 报文重置对方连接；
 
-## tcp_v4_conn_request
+2. listen 状态下，收到 RST 报文，直接丢弃报文；
+
+## 2.4 tcp_v4_conn_request
 
 ```C
 int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
@@ -128,7 +131,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 
 ```
 
-## tcp_conn_request
+## 2.5 tcp_conn_request
 
 ```C
 int tcp_conn_request(struct request_sock_ops *rsk_ops,
