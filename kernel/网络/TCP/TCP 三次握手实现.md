@@ -388,7 +388,30 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 							 req, &own_req);
 	if (!child)
 		goto listen_overflow;
+	......
+	return inet_csk_complete_hashdance(sk, child, req, own_req);
 }
 ```
+
+## 4.3 tcp_v4_syn_recv_sock
+
+```C
+struct sock *tcp_v4_syn_recv_sock(const struct sock *sk, struct sk_buff *skb,
+			                	  struct request_sock *req,
+								  struct dst_entry *dst,
+								  struct request_sock *req_unhash,
+								  bool *own_req)
+{
+	......
+	if (sk_acceptq_is_full(sk))
+		goto exit_overflow;
+
+	newsk = tcp_create_openreq_child(sk, req, skb);
+	if (!newsk)
+		goto exit_nonewsk;
+}
+```
+
+## 4.4 tcp_create_openreq_child
 
 
